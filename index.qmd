@@ -1,0 +1,48 @@
+---
+title: "You should program your statistical models in Stan. It is easier than you think, and I'll show you how"
+---
+
+In our research, we constantly rely on statistical models. Multiple R and Python packages provide models of various complexity from a basic t-test to generalized linear mixed models. However, they are limited in their design structure and flexibility of models that you can use. In this workshop, I will introduce an alternative approach of programming a statistical model from scratch using Stan probabilistic programming language. I will introduce syntax and walk you through an example of programming a basic two-group/condition comparison (a.k.a. a t-test), showing how it can be extended to allow for different distribution families, regularization. Next, I will show how Stan simplifies working with interactions using a two-way ANOVA. Finally, I will explain the underlying mechanisms of the MCMC engine, its limitations, how to diagnose the problems and ways to side-step them.
+
+This workshop is aimed at a broad audience and requires basic knowledge of statistics and programming (either R or Python). Its aim is to introduce a flexible method that allows to program virtually any statistical model that you are interested in.
+
+## Installing prerequisites
+
+To work with Stan, you will need to install 
+* library [CmdStanR](https://mc-stan.org/cmdstanr/) for R or [CmdStanPy](https://mc-stan.org/cmdstanpy/) for Python.
+* [cmdstan](https://mc-stan.org/docs/cmdstan-guide/installation.html) compiler
+* [toolchain](https://mc-stan.org/docs/cmdstan-guide/installation.html#cpp-toolchain) for compilation.
+
+### R
+
+On Windows, you will first need to install [rtools](https://cran.r-project.org/bin/windows/Rtools/). Then, follow the [installation instructions](https://mc-stan.org/cmdstanr/#installation) for the **CmdStanR** library
+
+```r
+# we recommend running this in a fresh R session or restarting your current session
+install.packages("cmdstanr", repos = c('https://stan-dev.r-universe.dev', getOption("repos")))
+```
+and for installing [CmdStan](https://mc-stan.org/cmdstanr/articles/cmdstanr.html#installing-cmdstan) itself via `cmdstanr::install_cmdstan(cores = 2)` function.
+
+
+### Python
+
+The easiest way to 
+
+## Why program your model?
+
+* Unlimited opportunities, you are no longer constrained by a (generalized) linear model format of the formula.
+
+## Stan syntax
+
+## Example 1: binomial proportion
+
+## Example 2: comparing counts between two groups
+
+## Hamiltonian MC engine
+
+## Example 3: a multilevel model
+
+## Example 4: non-linear model for serial dependence
+
+
+
