@@ -28,7 +28,7 @@ cmdstanr::install_cmdstan(cores = 2)
 ### Python
 
 Follow the [installation instructions]https://mc-stan.org/cmdstanpy/installation.html) for the **CmdStanPy** library.
-The easiest way to install into a Conda environment:
+The easiest way is to install into a Conda environment:
 
 ```bash
 conda create -n stan -c conda-forge cmdstanpy cxx-compiler make
