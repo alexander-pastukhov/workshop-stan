@@ -1,0 +1,93 @@
+---
+title: "Example 02 - proportion"
+format: html
+---
+
+```{r setup}
+#| echo: false
+#| message: false
+#| warning: false
+ 
+library(tidyverse)
+
+library(cmdstanr)
+```
+
+## Simulating data
+We are simulating thirty trials assuming 35% proportion of left dominance.
+```{r}
+set.seed(1977)
+example02_df <- tibble(Pleft = rbeta(30, 3.5, 10-3.5))
+```
+
+## Model definition
+
+$$P_{left} \sim BetaProportion(p, 1/\sigma)$$
+$$p \sim Beta(3, 3)$$
+$$\sigma \sim Exponential(1)$$
+
+```stan
+data {
+  int<lower=1> N;
+  array[N] real<lower=0, upper=1> Pleft;
+}
+
+parameters {
+  real<lower=0, upper=1> p;
+  real<lower=0> sigma;
+}
+
+model {
+  Pleft ~ beta_proportion(p, 1 / sigma);
+  
+  p ~ beta(3, 3);
+  sigma ~ exponential(1);
+}
+```
+
+## Compiling the model
+```{r}
+example02_model <- cmdstan_model("Stan/example02.stan")
+```
+
+## Preparing the data in Stan format
+
+```{r}
+example02_standata <- list(
+  N = nrow(example02_df),
+  Pleft = example02_df$Pleft
+)
+```
+
+## Sampling the model
+```{r}
+# sample the model
+example02_fit <- example02_model$sample(
+  example02_standata,
+  chains = 4,
+  parallel_chains = parallelly::availableCores())
+```
+
+## Extracting samples
+```{r}
+example02_samples <- example02_fit$draws(format = "df") |> as_tibble()
+```
+
+## Plot posterior distribution for estimated proportion of left dominance
+
+```{r}
+# compute 97% credible interval + median
+p_quantiles <- quantile(example02_samples$p, c((1-0.97)/2, 0.5, 1-(1-0.97)/2))
+
+ggplot(example02_samples, aes(x = p)) +
+  geom_histogram(bins = 100) +
+  geom_vline(xintercept = p_quantiles, linetype = "dashed") +
+  geom_vline(xintercept = mean(example02_df$Pleft), color = "blue") +
+  scale_x_continuous(name = "Pleft") 
+```
+
+## Compute probability that there are more right than left dominance periods 
+
+```{r}
+mean(example02_samples$p < 0.5)
+```

@@ -1,0 +1,143 @@
+---
+title: "Example 10 - multivariate"
+format: html
+---
+
+```{r setup}
+#| echo: false
+#| message: false
+#| warning: false
+ 
+library(tidyverse)
+
+library(cmdstanr)
+```
+
+## Model
+
+$$Correct_i \sim Bernoulli(p_i)$$
+$$RT_i \sim LogNormal(\mu_i, \sigma_{RT})$$
+$$logit(p_i) \sim \alpha_{Correct}[P_i] + \beta_{Correct}[P_i]\cdot S_i$$
+$$log(\mu_i) \sim \alpha_{RT}[P_i] + \beta_{RT}[P_i] \cdot S_i$$
+
+$$\begin{aligned}
+\begin{bmatrix}
+\alpha_{Correct}[P_i] \\
+\alpha_{RT}[P_i] \\
+\beta_{Correct}[P_i] \\
+\beta_{RT}[P_i]
+\end{bmatrix} 
+&\sim \text{MVNormal}\left( 
+\begin{bmatrix}
+\alpha_{\text{Correct}} \\
+\alpha_{\text{RT}} \\
+\beta_{\text{Correct}} \\
+\beta_{\text{RT}}
+\end{bmatrix}, \mathbf{S} 
+\right) \\[10pt]
+\mathbf{S} &= 
+\begin{pmatrix}
+\sigma_{\alpha_{\text{Correct}}} & 0 & 0 & 0 \\
+0 & \sigma_{\alpha_{\text{RT}}} & 0 & 0 \\
+0 & 0 & \sigma_{\beta_{\text{Correct}}} & 0 \\
+0 & 0 & 0 & \sigma_{\beta_{\text{RT}}}
+\end{pmatrix} 
+\mathbf{R} 
+\begin{pmatrix}
+\sigma_{\alpha_{\text{Correct}}} & 0 & 0 & 0 \\
+0 & \sigma_{\alpha_{\text{RT}}} & 0 & 0 \\
+0 & 0 & \sigma_{\beta_{\text{Correct}}} & 0 \\
+0 & 0 & 0 & \sigma_{\beta_{\text{RT}}}
+\end{pmatrix}
+\end{aligned}
+$$
+
+$$\alpha_{Correct} \sim Normal(logit(0.75), 1)$$
+$$\alpha_{RT} \sim Normal(log(1), 1)$$
+$$\beta_{Correct} \sim Normal(0, 1)$$
+$$\beta_{RT} \sim Normal(0, 1)$$
+$$\sigma_{\alpha_{\text{Correct}}}, 
+   \sigma_{\alpha_{\text{RT}}},
+   \sigma_{\beta_{\text{Correct}}}, 
+   \sigma_{\alpha_{\text{RT}}} \sim Exponential(1)$$
+
+$$R \sim LKJcorr(2)$$
+$$\sigma_{RT} \sim Exponential(1)$$
+
+```stan
+data {
+  int<lower=1> N;
+  int<lower=1> ParticipantsN;
+  
+  array[N] real Contrast;
+  array[N] int<lower=0, upper=1> Correct;
+  array[N] real<lower=0> RT;
+  array[N] int<lower=1, upper=ParticipantsN> Participant;
+}
+
+transformed data {
+  // constant to make reading code easier
+  int TasksN = 2;
+  int ParamsN = 2;
+}
+
+parameters {
+  vector[TasksN * ParamsN] mu;
+  cholesky_factor_corr[TasksN * ParamsN] lrho;
+  vector<lower=0>[TasksN * ParamsN] sigma;
+  matrix[TasksN * ParamsN, ParticipantsN] Z;
+  
+  real<lower=0> sigma_logRT;
+}
+
+transformed parameters {
+  // compute matrix of parameters for individual participants for each task 
+  // based on means (mu), variance-covariance matrix (lrho * sigma), and individual
+  // score (Z)
+  // loosely equivalent to P[i, j] = mu[i] + sigma[i] * z[j]
+  
+  matrix[TasksN * ParamsN, ParticipantsN] Params = 
+    rep_matrix(mu, ParticipantsN) +  // replicating group means for each participants
+    diag_pre_multiply(sigma, lrho) * // computing variance-covariance matrix from Cholesky decomposition
+      Z_eta[iT, iFB];                // multiplying by individual random effects
+      
+  // but a_Correct[Participant[i]] is equivalent to Params[1, Participant[i]]
+  vector[ParticipantsN] a_Correct = Params[1]'; // note ' for tranposition
+  vector[ParticipantsN] a_RT = Params[2]';
+  vector[ParticipantsN] b_Correct = Params[3]';
+  vector[ParticipantsN] b_RT = Params[4]';
+  
+  vector[N] p; // probability of correct response for correctness of responses
+  vector[N] mu; // mean log-RT
+  for(i in 1:N) {
+    p[i] = inv_logit(a_Correct[Participant[i]] + b_Correct[Participant[i]] * Contrast[i]);
+    mu[i] = exp(a_RT[Participant[i]] + b_RT[Participant[i]] * Contrast[i]);
+  }
+}
+
+model {
+  // binomial part
+  Correct ~ bernoulli(p);
+  mu[1] ~ normal(logit(0.75), 1); // a_Correct
+  mu[3] ~ normal(0, 1);           // b_Correct
+  
+  // RT part
+  RT ~ lognormal(mu, sigma_RT);
+  mu[2] ~ normal(exp(1), 1);      // a_RT
+  mu[4] ~ normal(0, 1);           // b_RT
+  sigma_RT ~ exponential(1);
+  
+  lrho ~ lkj_corr_cholesky(2);
+  sigma ~ exponential(1);
+  to_vector(Z) ~ normal(0, 1);
+}
+
+generated quantities {
+  // correlation matrix computed from Cholesky decomposition
+  matrix[TasksN * ParamsN, TasksN * ParamsN] rho = lrho * lrho';
+}
+```
+
+```{r}
+example10_model <- cmdstan_model("Stan/example10-multivariate.stan")
+```

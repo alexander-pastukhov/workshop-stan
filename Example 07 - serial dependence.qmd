@@ -1,0 +1,68 @@
+---
+title: "Example 07 - serial dependence"
+format: html
+---
+
+```{r setup}
+#| echo: false
+#| message: false
+#| warning: false
+ 
+library(tidyverse)
+
+library(cmdstanr)
+```
+
+
+## Model
+
+$$R_i \sim Normal(\mu_i, \sigma)$$
+$$\mu_i = \begin{cases} 
+      D_i & \text{for } i = 1 \\
+      D_i  + W_{prev} \cdot e^{-\frac{(R_{i-1}-D_i)^2}{2\lambda^2}} \cdot (R_{i-1}-D_i) & \text{for } i > 1 
+   \end{cases}$$
+$$W_{prev} \sim Normal(0, 1)$$ 
+$$\lambda \sim Exponential(1)$$
+$$\sigma \sim Exponential(1)$$
+
+```stan
+data {
+  int<lower=1> N;
+  
+  array[N] real Direction;
+  array[N] real Response;
+  array[N] int<lower=1> Trial;
+}
+
+parameters {
+  real Wprev;
+  real<lower=0> lambda;
+  
+  real<lower=0> sigma;
+}
+
+transformed parameters {
+  vector[N] mu;
+  
+  for(i in 1:N) {
+    if (Trial[i] == 1) {
+      mu[i] = Direction[i];
+    } else {
+      real prior_relevance = exp(-((Response[i-1] - Direction[i])^2) / (2 * lambda^2));
+      mu[i] = Direction[i] + Wprev * prior_relevance * (Response[i-1] - Direction[i]);
+    }
+  }
+}
+
+model {
+  Response ~ normal(mu, sigma);
+
+  Wprev ~ normal(0, 0.25);
+  lambda ~ exponential(1); // more optimal is to sample two_lambda_squared directly and then compute lambda
+  sigma ~ exponential(1);
+}
+```
+
+```{r}
+example07_model <- cmdstan_model("Stan/example07-serial-dependence.stan")
+```

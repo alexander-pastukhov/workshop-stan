@@ -1,0 +1,87 @@
+---
+title: "Example 01 - binomial proportion"
+format: html
+---
+
+```{r setup}
+#| echo: false
+#| message: false
+#| warning: false
+ 
+library(tidyverse)
+
+library(cmdstanr)
+```
+
+## Simulating data
+We are simulating thirty responses assuming 70% probability of the correct response.
+```{r}
+set.seed(1977)
+example01_df <- tibble(Correct = as.logical(rbinom(30, 1, 0.7)))
+```
+
+## Model definition
+
+$$Correct \sim Bernoulli(p)$$
+$$p \sim Beta(8, 3)$$
+
+```stan
+data {
+  int<lower=1> N; // Number of data points
+  array[N] int<lower=0, upper=1> Correct; // N responses, each is either correct (1) or erroneous (0)
+}
+parameters {
+  real<lower=0, upper=1> p; // Bernoulli distribution has just one parameter, p - proportion of 1 responses
+}
+model {
+  Correct ~ bernoulli(p);   // Sampling data from the Bernoulli distribution
+  p ~ beta(8, 3);           // Sampling parameter p from the Beta distribution, assuming weakly regularizing priors centered at ~75%
+}
+```
+
+## Compiling the model
+```{r}
+example01_model <- cmdstan_model("Stan/example01.stan")
+```
+
+## Preparing the data in Stan format
+
+```{r}
+example01_standata <- list(
+  N = nrow(example01_df),
+  Correct = example01_df$Correct
+)
+```
+
+## Sampling the model
+```{r}
+# sample the model
+example01_fit <- example01_model$sample(
+  example01_standata,
+  chains = 4,
+  parallel_chains = parallelly::availableCores())
+```
+
+## Extracting samples
+```{r}
+example01_samples <- example01_fit$draws(format = "df") |> as_tibble()
+```
+
+## Plot posterior distribution for probability of correct response
+
+```{r}
+# compute 97% credible interval + median
+p_quantiles <- quantile(example01_samples$p, c((1-0.97)/2, 0.5, 1-(1-0.97)/2))
+
+ggplot(example01_samples, aes(x = p)) +
+  geom_histogram(bins = 100) +
+  geom_vline(xintercept = p_quantiles, linetype = "dashed") +
+  geom_vline(xintercept = mean(example01_df$Correct), color = "blue") +
+  scale_x_continuous(name = "Pcorrect") 
+```
+
+## Compute probablity that performance is above chance level
+
+```{r}
+mean(example01_samples$p > 0.5)
+```

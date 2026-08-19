@@ -1,0 +1,257 @@
+---
+title: "Example 05 - two-way-ANOVA"
+format: html
+---
+
+```{r setup}
+#| echo: false
+#| message: false
+#| warning: false
+ 
+library(tidyverse)
+
+library(cmdstanr)
+library(ggforce)
+library(glue)
+```
+
+## Simulating data
+We are simulating attendance over fifteen weeks for three seminars (A, B, and C ) and for two semesters (W and S). We assume additive effects without an interaction. A-W: 15, B-W: 12, C-W: 13, A-S: 23, B-W: 20, C-W: 21
+
+```{r}
+weeks_n <- 30
+set.seed(2077)
+example05_df <- 
+  bind_rows(
+    tibble(Seminar = "A", Semester = "W", AttendanceN = rpois(weeks_n, 15)),
+    tibble(Seminar = "B", Semester = "W", AttendanceN = rpois(weeks_n, 12)),
+    tibble(Seminar = "C", Semester = "W", AttendanceN = rpois(weeks_n, 13)),
+    tibble(Seminar = "A", Semester = "S", AttendanceN = rpois(weeks_n, 23)),
+    tibble(Seminar = "B", Semester = "S", AttendanceN = rpois(weeks_n, 20)),
+    tibble(Seminar = "C", Semester = "S", AttendanceN = rpois(weeks_n, 21))) |>
+  mutate(Seminar = factor(Seminar),
+         Semester = factor(Semester, levels = c("W", "S")))
+         
+ggplot(example05_df, aes(x = Seminar, y = AttendanceN)) +
+  ggforce::geom_sina() +
+  facet_wrap(. ~ Semester)
+```
+
+## Model definitions
+
+### Baseline
+$$AttendanceN \sim Poisson(\lambda)$$
+$$\lambda \sim LogNormal(2.5, 3)$$
+
+```stan
+data {
+  int<lower=1> N;
+  int<lower=1> SeminarsN;
+  int<lower=1> SemestersN;
+  
+  array[N] int<lower=0> AttendanceN;
+  array[N] int<lower=1, upper=SeminarsN> Seminar;
+  array[N] int<lower=1, upper=SemesterN> Semester;
+}
+
+parameters {
+  real<lower=0> lambda;
+}
+
+model {
+  AttendanceN ~ poisson(lambda);
+  
+  lambda ~ lognormal(2.5, 0.3);
+}
+
+generated quantities {
+  vector[N] log_lik;
+  for(i in 1:N) log_lik[i] = poisson_lpmf(AttendanceN[i] | lambda);
+}
+```
+
+### Seminar only
+
+$$AttendanceN_i \sim Poisson(\lambda[Seminar_i])$$
+$$\lambda[Seminar_i] \sim LogNormal(2.5, 3)$$
+
+```stan
+data {
+  int<lower=1> N;
+  int<lower=1> SeminarsN;
+  int<lower=1> SemestersN;
+  
+  array[N] int<lower=0> AttendanceN;
+  array[N] int<lower=1, upper=SeminarsN> Seminar;
+  array[N] int<lower=1, upper=SemestersN> Semester;
+}
+
+parameters {
+  vector<lower=0>[SeminarsN] lambda;
+}
+
+model {
+  for(i in 1:N) AttendanceN[i] ~ poisson(lambda[Seminar[i]]);
+  
+  lambda ~ lognormal(2.5, 0.3);
+}
+
+generated quantities {
+  vector[N] log_lik;
+  for(i in 1:N) log_lik[i] = poisson_lpmf(AttendanceN[i] | lambda[Seminar[i]]);
+}
+```
+
+### Semester only
+
+$$AttendanceN_i \sim Poisson(\lambda[Semester_i])$$
+$$\lambda[Semester_i] \sim LogNormal(2.5, 3)$$
+```stan
+data {
+  int<lower=1> N;
+  int<lower=1> SeminarsN;
+  int<lower=1> SemestersN;
+  
+  array[N] int<lower=0> AttendanceN;
+  array[N] int<lower=1, upper=SeminarsN> Seminar;
+  array[N] int<lower=1, upper=SemestersN> Semester;
+}
+
+parameters {
+  vector<lower=0>[SemestersN] lambda;
+}
+
+model {
+  for(i in 1:N) AttendanceN[i] ~ poisson(lambda[Semester[i]]);
+  
+  lambda ~ lognormal(2.5, 0.3);
+}
+
+generated quantities {
+  vector[N] log_lik;
+  for(i in 1:N) log_lik[i] = poisson_lpmf(AttendanceN[i] | lambda[Semester[i]]);
+}
+```
+
+### Full model
+
+$$AttendanceN_i \sim Poisson(\lambda_i)$$
+$$log(\lambda_i) =  \alpha_{AW} + \beta_B\cdot IsB + \beta_C\cdot IsC + \beta_S\cdot IsSummer$$
+$$\alpha_{AW} \sim Normal(log(15), 0.5)$$
+$$\beta_B, \beta_C, \beta_S \sim Normal(0, 1)$$
+
+```sim
+data {
+  int<lower=1> N;
+  int<lower=1> SeminarsN;
+  int<lower=1> SemestersN;
+  
+  array[N] int<lower=0> AttendanceN;
+  array[N] int<lower=1, upper=SeminarsN> Seminar;
+  array[N] int<lower=1, upper=SemestersN> Semester;
+}
+
+parameters {
+  real a_A_W;
+  vector[SeminarsN - 1] b_Seminar;
+  real b_Semester;
+}
+
+transformed parameters {
+  matrix[SeminarsN, SemestersN] lambda;
+  for(iSeminar in 1:SeminarsN) {
+    for(iSemester in 1:SemestersN) {
+      if (iSeminar == 1) {
+        lambda[iSeminar, iSemester] = exp(a_A_W + b_Semester * (iSemester - 1));
+      } else {
+        lambda[iSeminar, iSemester] = exp(a_A_W + b_Seminar[iSeminar - 1] + b_Semester * (iSemester - 1));
+      }
+    }
+  }
+}
+
+model {
+  for(i in 1:N) AttendanceN[i] ~ poisson(lambda[Seminar[i], Semester[i]]);
+  
+  a_A_W ~ normal(log(15), 0.5);
+  b_Seminar ~ normal(0, 1);
+  b_Semester ~ normal(0, 1);
+}
+
+generated quantities {
+  vector[N] log_lik;
+  for(i in 1:N) log_lik[i] = poisson_lpmf(AttendanceN[i] | lambda[Seminar[i], Semester[i]]);
+}
+```
+### Interaction model
+
+$$AttendanceN_i \sim Poisson(\lambda[Seminar_i, Semester_i])$$
+$$\lambda[Seminar_i, Semester_i] \sim LogNormal(2.5, 3)$$
+
+```stan
+data {
+  int<lower=1> N;
+  int<lower=1> SeminarsN;
+  int<lower=1> SemestersN;
+  
+  array[N] int<lower=0> AttendanceN;
+  array[N] int<lower=1, upper=SeminarsN> Seminar;
+  array[N] int<lower=1, upper=SemestersN> Semester;
+}
+
+parameters {
+  matrix<lower=0>[SeminarsN, SemestersN] lambda;
+}
+
+model {
+  for(i in 1:N) AttendanceN[i] ~ poisson(lambda[Seminar[i], Semester[i]]);
+  
+  to_vector(lambda) ~ lognormal(2.5, 0.3);
+}
+
+generated quantities {
+  vector[N] log_lik;
+  for(i in 1:N) log_lik[i] = poisson_lpmf(AttendanceN[i] | lambda[Seminar[i], Semester[i]]);
+}
+```
+
+## Compiling all models
+```{r}
+example05_modelnames <- c("baseline", "seminar", "semester", "full", "interaction")
+example05_models <- map(example05_modelnames, ~cmdstan_model(glue("Stan/example05-{.}.stan")))
+names(example05_models) <- example05_modelnames
+```
+
+## Preparing the data in Stan format
+
+```{r}
+example05_standata <- list(
+  N = nrow(example05_df),
+  SeminarsN = nlevels(example05_df$Seminar),
+  SemestersN = nlevels(example05_df$Semester),
+  
+  AttendanceN = example05_df$AttendanceN,
+  Seminar = as.integer(example05_df$Seminar),
+  Semester = as.integer(example05_df$Semester)
+)
+```
+
+## Sampling all models
+```{r}
+  example05_fits <- list()
+  example05_loos <- list()
+  for(amodel in example05_modelnames) {
+    example05_fits[[amodel]] <- example05_models[[amodel]]$sample(
+      example05_standata,
+      chains = 4,
+      parallel_chains = parallelly::availableCores())
+  example05_loos[[amodel]] <- example05_fits[[amodel]]$loo()
+}
+```
+
+## Compare models via LOO information criterion
+
+```{r}
+loo::loo_compare(example05_loos)
+loo::loo_model_weights(example05_loos)
+```

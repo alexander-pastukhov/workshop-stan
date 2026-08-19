@@ -1,0 +1,246 @@
+---
+title: "Example 03 - two-group comparison"
+format: html
+---
+
+```{r setup}
+#| echo: false
+#| message: false
+#| warning: false
+ 
+library(tidyverse)
+
+library(cmdstanr)
+```
+
+## Simulating data
+We are simulating thirty trials assuming 82% correct for full attention condition and 72% for poor attention condition.
+
+```{r}
+trials_n <- 30
+set.seed(2077)
+example03_df <- 
+  tibble(
+    Attention = factor(rep(c("Full", "Poor"), each=trials_n), levels = c("Poor", "Full")),
+    Correct = c(rbinom(trials_n, 1, 0.82), rbinom(trials_n, 1, 0.72)))
+
+example03_avg <-
+  example03_df |>
+  group_by(Attention) |>
+  summarise(Pcorrect = mean(Correct), .groups = "drop")
+
+example03_avg
+```
+
+## Model definition: difference as parameter
+
+$$Correct \sim Bernoulli(p_i)$$
+$$logit(p_i) = \alpha_{poor} + \beta_{A} IsFull_i$$
+
+$$\alpha_{poor} \sim Normal(logit(0.75), 0.5)$$
+$$\beta_A \sim Normal(0, 1)$$
+
+```stan
+data {
+  int<lower=1> N;
+  int<lower=1> AttentionN;
+  
+  array[N] int<lower=0, upper=1> Correct;
+  array[N] int<lower=1, upper=AttentionN> Attention;
+}
+
+transformed data {
+  array[N] int IsFull = to_vector(Attention) - 1;
+  // alternative via for loop
+  // for(i in 1:N) IsStats[i] = Seminar[i] - 1;
+}
+
+parameters {
+  real a_poor;
+  real b_A;
+}
+
+transformed parameters {
+  vector[N] p;
+  for(i in 1:N) {
+    // logit link, i.e., logit(p[i]) = a_poor + b_A * IsFull[i]
+    p[i] = inv_logit(a_poor + b_A * IsFull[i]);
+  }
+}
+
+model {
+  Correct[i] ~ bernoulli(p);
+
+  a_poor ~ normal(logit(0.75), 0.5);
+  b_A ~ normal(0, 1);
+}
+
+generated quantities {
+  // probability of correct response
+  vector[2] pCorrect;
+  pCorrect[1] = inv_logit(a_poor);
+  pCorrect[2] = inv_logit(a_poor + b_A);
+
+  // difference between conditions in probability space  
+  real dA = pCorrect[2] - pCorrect[1];
+}
+```
+
+## Compiling the model
+```{r}
+example03_model <- cmdstan_model("Stan/example03-via-difference.stan")
+```
+
+## Preparing the data in Stan format
+
+```{r}
+example03_standata <- list(
+  N = nrow(example03_df),
+  AttentionN = nlevels(example03_df$Attention),
+  
+  Correct = example03_df$Correct,
+  Attention = as.integer(example03_df$Attention)
+)
+```
+
+## Sampling the model
+```{r}
+# sample the model
+example03_fit <- example03_model$sample(
+  example03_standata,
+  chains = 4,
+  parallel_chains = parallelly::availableCores())
+```
+
+## Extracting samples
+```{r}
+example03_samples <- example03_fit$draws(format = "df") |> as_tibble()
+```
+
+## Plot posterior distribution for estimated proportion of correct responses per condition
+
+```{r}
+# getting probability of correct response as a long table
+posterior_pcorrect <-
+  example03_samples |>
+  select(.draw, starts_with('pCorrect')) |>
+  pivot_longer(starts_with('pCorrect'), names_to = "Attention", values_to = "Pcorrect") |>
+  mutate(Attention = factor(Attention, labels = levels(example03_df$Attention)))
+
+ggplot(posterior_pcorrect, aes(x = Attention, y = Pcorrect)) +
+  geom_violin() +
+  geom_errorbar(data = example03_avg, aes(ymin = Pcorrect, ymax = Pcorrect))
+```
+
+## Plot posterior distribution for estimated difference in log-odds (b_A)
+
+```{r}
+# compute 97% credible interval + median
+b_A_quantiles <- quantile(example03_samples$b_A, c((1-0.97)/2, 0.5, 1-(1-0.97)/2))
+
+ggplot(example03_samples, aes(x = b_A)) +
+  geom_histogram(bins = 100) +
+  geom_vline(xintercept = b_A_quantiles, linetype = "dashed") +
+  geom_vline(xintercept = 0, color = "red") +
+  scale_x_continuous(name = "Pcorrect") +
+  labs(subtitle = sprintf("P(b_A>0)=%.1f%%", 100 * mean(example03_samples$b_A > 0)))
+```
+
+## Plot posterior distribution for estimated difference in units of probability
+
+```{r}
+# compute 97% credible interval + median
+dA_quantiles <- quantile(example03_samples$dA, c((1-0.97)/2, 0.5, 1-(1-0.97)/2))
+
+ggplot(example03_samples, aes(x = dA)) +
+  geom_histogram(bins = 100) +
+  geom_vline(xintercept = dA_quantiles, linetype = "dashed") +
+  geom_vline(xintercept = 0, color = "red") +
+  scale_x_continuous(name = "Pcorrect") +
+  labs(subtitle = sprintf("P(F>P)=%.1f%%", 100 * mean(example03_samples$dA > 0)))
+```
+
+
+## Same model but via indexing approach
+
+$$Correct \sim Bernoulli(p_i)$$
+$$p_i = p_{correct}[Attention_i]$$
+
+$$p_{correct} \sim BetaProportion(0.75, 5)$$
+```stan
+data {
+  int<lower=1> N;
+  int<lower=1> AttentionN;
+  
+  array[N] int<lower=0, upper=1> Correct;
+  array[N] int<lower=1, upper=AttentionN> Attention;
+}
+
+parameters {
+  vector[AttentionN] pCorrect;
+}
+
+transformed parameters {
+  vector[N] p;
+  for(i in 1:N) p[i] = pCorrect[Attention[i]];
+}
+
+model {
+  Correct ~ bernoulli(p);
+
+  pCorrect ~ beta_proportion(0.75, 5);
+}
+
+generated quantities {
+  // difference between conditions in probability space  
+  real dA = pCorrect[2] - pCorrect[1];
+}
+```
+
+Compiling the model
+```{r}
+example03_indexing_model <- cmdstan_model("Stan/example03-via-indexing.stan")
+```
+
+Sampling
+```{r}
+# sample the model
+example03_indexing_fit <- example03_indexing_model$sample(
+  example03_standata,
+  chains = 4,
+  parallel_chains = parallelly::availableCores())
+```
+
+Extracting samples
+```{r}
+example03_indexing_samples <- example03_indexing_fit$draws(format = "df") |> as_tibble()
+```
+
+Plot posterior distribution for estimated proportion of correct responses per condition
+
+```{r}
+# getting probability of correct response as a long table
+posterior_pcorrect <-
+  example03_indexing_samples |>
+  select(.draw, starts_with('pCorrect')) |>
+  pivot_longer(starts_with('pCorrect'), names_to = "Attention", values_to = "Pcorrect") |>
+  mutate(Attention = factor(Attention, labels = levels(example03_df$Attention)))
+
+ggplot(posterior_pcorrect, aes(x = Attention, y = Pcorrect)) +
+  geom_violin() +
+  geom_errorbar(data = example03_avg, aes(ymin = Pcorrect, ymax = Pcorrect))
+```
+
+Plot posterior distribution for estimated difference in units of probability
+
+```{r}
+# compute 97% credible interval + median
+dA_quantiles <- quantile(example03_indexing_samples$dA, c((1-0.97)/2, 0.5, 1-(1-0.97)/2))
+
+ggplot(example03_indexing_samples, aes(x = dA)) +
+  geom_histogram(bins = 100) +
+  geom_vline(xintercept = dA_quantiles, linetype = "dashed") +
+  geom_vline(xintercept = 0, color = "red") +
+  scale_x_continuous(name = "Pcorrect") +
+  labs(subtitle = sprintf("P(F>P)=%.1f%%", 100 * mean(example03_indexing_samples$dA > 0)))
+```

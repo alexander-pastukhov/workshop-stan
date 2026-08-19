@@ -1,0 +1,89 @@
+---
+title: "Exercise 01 - Poisson counts"
+format: html
+---
+
+```{r setup}
+#| echo: false
+#| message: false
+#| warning: false
+ 
+library(tidyverse)
+
+library(cmdstanr)
+```
+
+## Simulating data
+We are simulating 15 presence counts assuming 12.5 average attendance.
+```{r}
+set.seed(1977)
+exercise01_df <- tibble(PresentN = rpois(15, 12.5))
+```
+
+## Model
+
+Create a model in Stan for count data. The distribution you sample data from is [poisson(lambda)](https://mc-stan.org/docs/functions-reference/unbounded_discrete_distributions.html#poisson). The parameter $\lambda$ can be sampled from prior distribution $lognormal(2.5, 0.35)$.
+
+$$PresentN \sim Poisson(\lambda)$$
+$$\lambda \sim LogNormal(2.5, 0.35)$$
+
+```stan
+data {
+  int<lower=1> N;
+  array[N] int<lower=0> PresentN;
+}
+parameters {
+  real<lower=0> lambda;
+}
+model {
+  PresentN ~ poisson(lambda);   
+  lambda ~ lognormal(2.5, 0.3);
+}
+```
+
+## Compiling the model
+```{r}
+exercise01_model <- cmdstan_model("Stan/exercise01.stan")
+```
+
+## Preparing the data in Stan format
+
+```{r}
+exercise01_standata <- list(
+  N = nrow(exercise01_df),
+  PresentN = exercise01_df$PresentN
+)
+```
+
+## Sampling the model
+```{r}
+# sample the model
+exercise01_fit <- exercise01_model$sample(
+  exercise01_standata,
+  chains = 4,
+  parallel_chains = parallelly::availableCores())
+```
+
+## Extracting samples
+```{r}
+exercise01_samples <- exercise01_fit$draws(format = "df") |> as_tibble()
+```
+
+## Plot posterior distribution for attendance
+
+```{r}
+# compute 97% credible interval + median
+lambda_quantiles <- quantile(exercise01_samples$lambda, c((1-0.97)/2, 0.5, 1-(1-0.97)/2))
+
+ggplot(exercise01_samples, aes(x = lambda)) +
+  geom_histogram(bins = 100) +
+  geom_vline(xintercept = lambda_quantiles, linetype = "dashed") +
+  geom_vline(xintercept = mean(exercise01_df$PresentN), color = "blue") +
+  scale_x_continuous(name = "Presence") 
+```
+
+## Compute probablity that performance is above 12
+
+```{r}
+mean(exercise01_samples$lambda > 12)
+```
