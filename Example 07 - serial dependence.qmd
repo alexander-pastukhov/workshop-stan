@@ -13,6 +13,11 @@ library(tidyverse)
 library(cmdstanr)
 ```
 
+In psychophysical experiment, e.g., a direction discrimination task pictured below, participants' responses may reflect influence of prior experience in a phenomenon dubbed "serial dependence".
+
+![](images/example07-experiment.png)
+
+We can build a model that incorporates this influence based on overall importance of prior information ($W_{prev}$) and its relevance during the current trial based on Gaussian distance between prior respones and current perceptual evidence controlled by parameter $\lambda$.
 
 ## Model
 

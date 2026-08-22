@@ -13,6 +13,20 @@ library(tidyverse)
 library(cmdstanr)
 ```
 
+Build-up of adaptation (habituation) during dominance of the perceptual stay and decay of it when it is suppressed.
+![](images/example08-habituation-in-perception.png)
+
+This process can be described by a first-order equation.
+
+$$\frac{dH_i}{dt} = \frac{1}{\tau} (-H_i + S_i(t))$$
+
+which can be reformulated as
+
+$$H_i(\Delta t) = S + (H_i(0) - S)  \cdot e^{-\Delta t/\tau}$$
+The time constant $\tau$ controls the speed of biuild-up / decay.
+
+![](images/example08-different-time-constants.png)
+
 ## Model
 
 $$D_i \sim Gamma(\sigma_i, \rho)$$

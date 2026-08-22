@@ -14,6 +14,9 @@ library(tidyverse)
 library(cmdstanr)
 ```
 
+Mediation of the effect of predictor (P) on the outcome (O) via a mediator (M)
+![](images/example09-mediaition.png)
+
 ## Model
 
 Full effect model

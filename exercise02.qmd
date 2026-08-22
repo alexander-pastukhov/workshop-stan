@@ -1,0 +1,77 @@
+---
+title: "Exercise 02 - Normal height"
+format: html
+---
+
+```{r setup}
+#| echo: false
+#| message: false
+#| warning: false
+ 
+library(tidyverse)
+
+library(cmdstanr)
+```
+
+## Simulating data
+We are simulating 23 average heights.
+```{r}
+set.seed(1977)
+exercise02_df <- tibble(Height = rnorm(23, 170, 10))
+```
+
+## Model
+
+Create a model in Stan for height data. We can assume that data can be described by a normal distribution: [normal(mu, sigma)](https://mc-stan.org/docs/functions-reference/unbounded_continuous_distributions.html#normal-distribution).
+
+
+```stan
+
+```
+
+## Compiling the model
+```{r}
+exercise02_model <- cmdstan_model("Stan/exercise02.stan")
+```
+
+## Preparing the data in Stan format
+
+```{r}
+exercise02_standata <- list(
+  N = nrow(exercise02_df),
+  Height = exercise02_df$Height
+)
+```
+
+## Sampling the model
+```{r}
+# sample the model
+exercise02_fit <- exercise02_model$sample(
+  exercise02_standata,
+  chains = 4,
+  parallel_chains = parallelly::availableCores())
+```
+
+## Extracting samples
+```{r}
+exercise02_samples <- exercise02_fit$draws(format = "df") |> as_tibble()
+```
+
+## Plot posterior distribution for attendance
+
+```{r}
+# compute 97% credible interval + median
+mu_quantiles <- quantile(exercise02_samples$mu, c((1-0.97)/2, 0.5, 1-(1-0.97)/2))
+
+ggplot(exercise02_samples, aes(x = mu)) +
+  geom_histogram(bins = 100) +
+  geom_vline(xintercept = mu_quantiles, linetype = "dashed") +
+  geom_vline(xintercept = mean(exercise02_df$Height), color = "blue") +
+  scale_x_continuous(name = "Presence") 
+```
+
+## Compute probability that average group height is above average height of 178
+
+```{r}
+mean(exercise02_samples$mu > 178)
+```
